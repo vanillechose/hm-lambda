@@ -8,12 +8,13 @@ type operator =
 
 type term =
   | Unit
-  | Bool  of bool
-  | Var   of string
-  | App   of lterm * lterm
-  | BinOp of operator * lterm * lterm
-  | Abs   of string * lterm
-  | LetIn of string * lterm * lterm
+  | Bool    of bool
+  | Var     of string
+  | App     of lterm * lterm
+  | BinOp   of operator * lterm * lterm
+  | IfElse  of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
+  | Abs     of string * lterm
+  | LetIn   of string * lterm * lterm
 and lterm = location * term
 
 type toplevel_item = LetDef of string option * lterm

@@ -2,10 +2,12 @@
   type token =
     | And
     | Dot
+    | Else
     | Eof
     | Eq
     | False
     | Ident of string
+    | If
     | In
     | LParen
     | Lambda
@@ -14,29 +16,36 @@
     | Or
     | Other of char
     | RParen
+    | Then
     | True
 
   let string_of_token = function
     | And       -> "'&&'"
     | Dot       -> "'.'"
+    | Else      -> "'else'"
     | Eof       -> "end of file"
     | Eq        -> "'='"
     | False     -> "'#f'"
     | Ident _   -> "identifier"
+    | If        -> "'if'"
     | In        -> "'in'"
-    | Or        -> "'||'"
-    | Other c   -> "character '" ^ (String.make 1 c) ^ "'"
     | LParen    -> "'('"
     | Lambda    -> "'\\'"
     | Let       -> "'let'"
     | Neq       -> "'<>'"
+    | Or        -> "'||'"
+    | Other c   -> "character '" ^ (String.make 1 c) ^ "'"
     | RParen    -> "')'"
+    | Then      -> "'then'"
     | True      -> "'#t'"
 
   let make_keyword_or_ident = function
-    | "let" -> Let
-    | "in"  -> In
-    | w     -> Ident w
+    | "else"  -> Else
+    | "if"    -> If
+    | "in"    -> In
+    | "let"   -> Let
+    | "then"  -> Then
+    | w       -> Ident w
 }
 
 let ws     = [' ' '\t' '\n']

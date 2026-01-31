@@ -32,6 +32,7 @@ and have the same precedence. Equality tests on closures are well-typed but will
 always return false
 - **Boolean expressions**: `M && N` or `M || N`, `&&` and `||` are right-associative
 and have the same precedence
+- **if ... then ... else ...** expressions.
 - **Let-in expressions**: `let x = M in N`
     - If `M` is well-typed, its type is generalized and `x` becomes a
     polymorphic object. Each occurrence of `x` in `N` will be typed with

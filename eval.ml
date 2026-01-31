@@ -1,9 +1,10 @@
 type code =
-  | Load of value
-  | Var  of int
-  | Abs  of code
-  | App  of code * code
-  | Op   of Terms.operator * code * code
+  | Load   of value
+  | Var    of int
+  | Abs    of code
+  | App    of code * code
+  | Op     of Terms.operator * code * code
+  | Branch of { cond : code ; ifbr : code ; elsebr : code }
 and value =
   | Unit
   | Bool    of bool
@@ -24,8 +25,8 @@ let string_of_operator = function
 let string_of_code code =
   let ws k = String.make (2 * k) ' ' in
   let rec aux depth = function
-    | Load v -> ws depth ^ "load " ^ string_of_value v ^ "\n"
-    | Var n -> ws depth ^ "var " ^ string_of_int n ^ "\n"
+    | Load v -> ws depth ^ "load " ^ string_of_value v
+    | Var n -> ws depth ^ "var " ^ string_of_int n
     | Abs m -> ws depth ^ "closure\n" ^ aux (depth + 1) m
     | App (m, n) ->
         ws depth ^ "apply\n"
@@ -33,10 +34,17 @@ let string_of_code code =
         ^ aux (depth + 1) n
     | Op (f, m, n) ->
         ws depth ^ string_of_operator f ^ "\n"
-        ^ aux (depth + 1) m
+        ^ aux (depth + 1) m ^ "\n"
         ^ aux (depth + 1) n
+    | Branch { cond : code ; ifbr : code ; elsebr : code } ->
+        ws depth ^ "if\n"
+        ^ aux (depth + 1) cond ^ "\n"
+        ^ "then\n"
+        ^ aux (depth + 1) ifbr ^ "\n"
+        ^ "else\n"
+        ^ aux (depth + 1) elsebr
   in
-  String.trim (aux 0 code)
+  aux 0 code
 
 let eval ?(trace=false) env code =
   let print_trace depth m =
@@ -89,5 +97,12 @@ let eval ?(trace=false) env code =
         in
         print_trace depth (string_of_operator f ^ " = " ^ string_of_value w) ;
         w
+    | Branch { cond ; ifbr ; elsebr } ->
+        let v = aux depth env cond in
+        print_trace depth "branch" ;
+        begin match v with
+          | Bool true -> aux depth env ifbr
+          | Bool false -> aux depth env elsebr
+        end
   in
   aux 0 env code

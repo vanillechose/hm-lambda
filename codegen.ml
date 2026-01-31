@@ -40,6 +40,11 @@ let codegen layout (item : Terms.toplevel_item) =
       | (_, LetIn _) ->
           let m = letin_to_app term in
           aux layout m
+      | (_, IfElse { cond ; ifbr ; elsebr }) ->
+          let cond = aux layout cond in
+          let ifbr = aux layout ifbr in
+          let elsebr = aux layout elsebr in
+          Branch { cond ; ifbr ; elsebr }
   in
   match item with
     | LetDef (Some name, term) ->

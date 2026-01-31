@@ -177,6 +177,13 @@ let type_term env term =
           let env   = subst_env rm env in
           let rn    = expect_type env n a in
           (compose rn rm, ConstType BoolType)
+      | IfElse { cond ; ifbr ; elsebr } ->
+          let rm    = expect_type env cond (ConstType BoolType) in
+          let env   = subst_env rm env in
+          let rn, a = w env ifbr in
+          let env   = subst_env rn env in
+          let ro    = expect_type env elsebr a in
+          (compose ro (compose rn rm), subst ro a)
       (* (i) variable *)
       | Var x ->
           begin match SMap.find_opt x env with

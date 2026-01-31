@@ -8,12 +8,13 @@ type operator =
 
 type term =
   | Unit
-  | Bool  of bool
-  | Var   of string
-  | App   of lterm * lterm
-  | BinOp of operator * lterm * lterm
-  | Abs   of string * lterm
-  | LetIn of string * lterm * lterm
+  | Bool    of bool
+  | Var     of string
+  | App     of lterm * lterm
+  | BinOp   of operator * lterm * lterm
+  | IfElse  of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
+  | Abs     of string * lterm
+  | LetIn   of string * lterm * lterm
 and lterm = location * term
 
 type toplevel_item =
@@ -25,6 +26,7 @@ let paren s = "(" ^ s ^ ")"
  * Precedence | Associativity | Operator      |
  *          1 |             X |      *let-in* |
  *         11 |             X |      *lambda* |
+ *         16 |             X |     *if-else* |
  *         21 |         right |        &&, || |
  *         31 |         right |         =, <> |
  *         41 |          left | *application* |
@@ -48,6 +50,9 @@ let string_of_term (_, term) =
         (* precedence 21, right associative *)
         let s = aux 21 m ^ (if f = And then " && " else " || ") ^ aux 20 n in
         if pmin >= 21 then paren s else s
+    | IfElse { cond = (_, m) ; ifbr = (_, n) ; elsebr = (_, o) } ->
+        let s = "if " ^ aux 0 m ^ " then " ^ aux 0 n ^ " else " ^ aux 0 o in
+        if pmin >= 16 then paren s else s
     | Abs (x, (_, m)) ->
         (* precedence 11 *)
         let s = "\\" ^ x ^ ". " ^ aux 10 m in
@@ -69,15 +74,17 @@ type parse_error =
  *     ;
  *
  * lambda: '\' IDENT '.' term
- *       | expr
+ *       | if-expr
  *       ;
  *
- * expr: test '&&' test
- *     | test '||' test
+ * if-expr: IF term THEN term ELSE term
+ *
+ * expr: test { '&&' test }
+ *     | test { '||' test }
  *     ;
  *
- * test: factor '=' factor
- *     | factor '<>' factor
+ * test: factor { '=' factor }
+ *     | factor { '<>' factor }
  *     ;
  *
  * factor: factor atom
@@ -165,11 +172,13 @@ let parse source =
   and parse_factor stack =
     match tok () with
       | And
+      | Else
       | Eof
       | Eq
       | In
       | Neq
       | Or
+      | Then
       | RParen ->
           reduce (loc ()) (List.rev stack)
       | _ -> let m = parse_atom () in parse_factor (m :: stack)
@@ -196,6 +205,19 @@ let parse source =
           (off, BinOp (op, m, n))
       | _ -> m
 
+  and parse_ifelse () =
+    match tok () with
+      | If ->
+          let off = loc () in
+          bump () ;
+          let cond   = parse_term () in
+          let _      = expect Then in
+          let ifbr   = parse_term () in
+          let _      = expect Else in
+          let elsebr = parse_term () in
+          (off, IfElse { cond ; ifbr ; elsebr })
+      | _ -> parse_expr ()
+
   and parse_lambda () =
     match tok () with
       | Lambda ->
@@ -205,7 +227,7 @@ let parse source =
           let _    = expect Dot in
           let m    = parse_term () in
           (off, Abs (name, m))
-      | _ -> parse_expr ()
+      | _ -> parse_ifelse ()
 
   and parse_term () =
     match tok () with
