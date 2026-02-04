@@ -6,6 +6,8 @@ let err_with_source source loc msg =
 let report_parse_error source = function
   | Terms.EmptyTerm loc ->
       err_with_source source loc "empty term"
+  | Terms.NoCases loc ->
+      err_with_source source loc "this match expression has no arms"
   | Terms.SyntaxError (loc, msg) ->
       err_with_source source loc msg
 
@@ -14,6 +16,10 @@ let report_semantic_error source = function
       err_with_source source loc ("unbound variable " ^ name)
   | Typing.TypeMismatch { loc ; expected ; found } ->
       let msg = "this expression has type " ^ Typing.string_of_type found ^ " but type "
+        ^ Typing.string_of_type expected ^ " was expected" in
+      err_with_source source loc msg
+  | Typing.TypePatMismatch { loc ; expected ; found } ->
+      let msg = "this pattern has type " ^ Typing.string_of_type found ^ " but type "
         ^ Typing.string_of_type expected ^ " was expected" in
       err_with_source source loc msg
 
@@ -51,13 +57,15 @@ let interp source =
       end ;
 
       let v = Eval.eval ~trace:!show_trace !interpreter_env code in
-      let name =
-        match name with
-          | Some name -> interpreter_env := v :: !interpreter_env ; name
-          | None -> "-"
-      in
-      print_eval_result name v typ ;
-      Ok ()
+      Result.bind v (fun v ->
+        let name =
+          match name with
+            | Some name -> interpreter_env := v :: !interpreter_env ; name
+            | None -> "-"
+        in
+        print_eval_result name v typ ;
+        Ok ()
+      )
     )
   )
 

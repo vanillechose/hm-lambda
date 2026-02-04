@@ -1,20 +1,27 @@
 type code =
-  | Load   of value
-  | Var    of int
-  | Abs    of code
-  | App    of code * code
-  | Op     of Terms.operator * code * code
-  | Branch of { cond : code ; ifbr : code ; elsebr : code }
+  | Load      of value
+  | Var       of int
+  | Abs       of code
+  | App       of code * code
+  | Op        of Terms.operator * code * code
+  | Branch    of { cond : code ; ifbr : code ; elsebr : code }
+  | Fail      of string
+  | MakeBlock of code list
+  | Access    of int * code
 and value =
   | Unit
   | Bool    of bool
+  | Int     of int
+  | Block   of value list
   | Closure of code * env
 and env = value list
 
 let string_of_value = function
   | Unit -> "()"
   | Bool b -> "#" ^ if b then "t" else "f"
+  | Int k -> string_of_int k
   | Closure _ -> "<fun>"
+  | Block vs -> "<block of " ^ string_of_int (List.length vs) ^ " values>"
 
 let string_of_operator = function
   | Terms.And -> "and"
@@ -30,7 +37,7 @@ let string_of_code code =
     | Abs m -> ws depth ^ "closure\n" ^ aux (depth + 1) m
     | App (m, n) ->
         ws depth ^ "apply\n"
-        ^ aux (depth + 1) m
+        ^ aux (depth + 1) m ^ "\n"
         ^ aux (depth + 1) n
     | Op (f, m, n) ->
         ws depth ^ string_of_operator f ^ "\n"
@@ -39,10 +46,19 @@ let string_of_code code =
     | Branch { cond : code ; ifbr : code ; elsebr : code } ->
         ws depth ^ "if\n"
         ^ aux (depth + 1) cond ^ "\n"
-        ^ "then\n"
+        ^ ws depth ^ "then\n"
         ^ aux (depth + 1) ifbr ^ "\n"
-        ^ "else\n"
+        ^ ws depth ^ "else\n"
         ^ aux (depth + 1) elsebr
+    | Fail msg ->
+        ws depth ^ "fail " ^ msg
+    | MakeBlock ms ->
+        let s = List.map (aux (depth + 1)) ms in
+        ws depth ^ "makeblock\n"
+        ^ List.fold_left (fun x y -> x ^ "\n" ^ y) (List.hd s) (List.tl s)
+    | Access (k, m) ->
+        ws depth ^ "access " ^ string_of_int k ^ "\n"
+        ^ aux (depth + 1) m
   in
   aux 0 code
 
@@ -51,6 +67,7 @@ let eval ?(trace=false) env code =
     if trace then
       print_endline ("(trace) " ^ String.make (4 * depth) ' ' ^ m)
   in
+  let exception Failure in
   (* Disable warnings about non-exhaustive pattern matching.
    * At this point we know the expression is well-typed so
    * it should not cause any problem *)
@@ -104,5 +121,17 @@ let eval ?(trace=false) env code =
           | Bool true -> aux depth env ifbr
           | Bool false -> aux depth env elsebr
         end
+    | Fail msg ->
+        print_endline ("failure: " ^ msg) ;
+        raise Failure
+    | MakeBlock ms ->
+        let v = Block (List.map (aux depth env) ms) in
+        print_trace depth ("makeblock = " ^ string_of_value v) ;
+        v
+    | Access (k, m) ->
+        let Block vs = aux depth env m in
+        let v = List.nth vs k in
+        print_trace depth ("access " ^ string_of_int k ^ " = " ^ string_of_value v) ;
+        v
   in
-  aux 0 env code
+  try Ok (aux 0 env code) with Failure -> Error ()

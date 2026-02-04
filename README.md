@@ -51,6 +51,8 @@ top-level directives of the form `#directive`:
 
 ## Bugs / Todo
 
+- Multiline editing
+
 - Type and evaluate `let rec` bindings
 
 - Improve type inference. The type system, based on algorithm W as described in [1],
@@ -79,3 +81,5 @@ f : unit = ()
 [1] Luis Damas and Robin Milner. 1982. Principal type-schemes for functional programs. In Proceedings of the 9th ACM SIGPLAN-SIGACT symposium on Principles of programming languages (POPL '82). Association for Computing Machinery, New York, NY, USA, 207–212. https://doi.org/10.1145/582153.582176
 
 [2] Didier Rémy. Extension of ML type system with a sorted equation theory on types. [Research Report] RR-1766, INRIA. 1992. inria-00077006
+
+[3] Luc Maranget. 2008. Compiling pattern matching to good decision trees. In Proceedings of the 2008 ACM SIGPLAN workshop on ML (ML '08). Association for Computing Machinery, New York, NY, USA, 35–46. https://doi.org/10.1145/1411304.1411311

@@ -4,20 +4,38 @@ type var = Bound of int | Free of int
 type const =
   | UnitType
   | BoolType
+  | IntType
 
 (* type or type scheme *)
 type typ =
   | ConstType of const
-  | VarType of var
-  | ArrType of typ * typ
+  | VarType   of var
+  | ArrType   of typ * typ
+  | TupleType of typ list
 
-let rec string_of_type = function
-  | ConstType UnitType -> "unit"
-  | ConstType BoolType -> "bool"
-  | VarType (Bound x) -> "'" ^ string_of_int x
-  | VarType (Free x) -> "'_" ^ string_of_int x
-  | ArrType (ArrType _ as a, b) -> "(" ^ string_of_type a ^ ") -> " ^ string_of_type b
-  | ArrType (a, b) -> string_of_type a ^ " -> " ^ string_of_type b
+module Info = struct
+  type t = typ
+
+  open Termfmt
+
+  let term_info = function
+    | ConstType UnitType -> Constant "unit"
+    | ConstType BoolType -> Constant "bool"
+    | ConstType IntType -> Constant "int"
+    | VarType (Bound x) -> Constant ("'" ^ string_of_int x)
+    | VarType (Free x) -> Constant ("'_" ^ string_of_int x)
+    | ArrType (a, b) ->
+        Binary { prec = 1 ; assoc = Right ; left = a ;
+          infix = " -> " ; right = b }
+    | TupleType (_ :: [] | []) -> failwith "tuple with < 2 elements"
+    | TupleType (a :: bs) ->
+        Nary { prec = 2 ; prefix = "" ; head = a ;
+          suffix = "" ; children = List.map (fun b -> (" * ", b)) bs }
+end
+
+module F = Termfmt.Make(Info)
+
+let string_of_type = F.string_of_t
 
 module IMap = Map.Make(Int)
 module ISet = Set.Make(Int)
@@ -31,6 +49,7 @@ let rec occurs x = function
   | VarType (Bound _) -> false
   | VarType (Free x') -> x = x'
   | ArrType (a, b) -> occurs x a || occurs x b
+  | TupleType bs -> List.exists (occurs x) bs
 
 (* applies substitution r to type a. *)
 let subst r a =
@@ -44,6 +63,7 @@ let subst r a =
           | None -> VarType (Free x)
         end
     | ArrType (a, b) -> ArrType (aux a, aux b)
+    | TupleType bs -> TupleType (List.map aux bs)
   in
   aux a
 
@@ -67,6 +87,13 @@ let rec mgu a b : substitution =
         let r = mgu a a' in
         let s = mgu (subst r b) (subst r b') in
         compose r s
+    | (TupleType bs, TupleType bs') ->
+        if List.length bs <> List.length bs' then
+          raise Unify ;
+        List.fold_left (fun r (a, a') ->
+          let s = mgu (subst r a) (subst r a') in
+          compose r s
+        ) [] (List.combine bs bs')
     | (ConstType c, ConstType c') ->
         if c = c' then [] else raise Unify
     | (_, VarType (Bound _))
@@ -85,6 +112,7 @@ let free_vars_of_type a =
     | VarType (Free x) -> ISet.add x acc
     | VarType (Bound _) -> acc
     | ArrType (a, b) -> aux (aux acc a) b
+    | TupleType bs -> List.fold_left aux acc bs
   in
   aux ISet.empty a
 
@@ -111,6 +139,7 @@ let generalize env a =
           VarType (Bound x)
     | VarType (Bound _) -> failwith "attempt to generalize a type scheme"
     | ArrType (a, b) -> ArrType(aux a, aux b)
+    | TupleType bs -> TupleType (List.map aux bs)
   in
   aux a
 
@@ -118,6 +147,7 @@ let instantiate a =
   let newvars = ref IMap.empty in
   let rec aux = function
     | ArrType (a, b) -> ArrType (aux a, aux b)
+    | TupleType bs -> TupleType (List.map aux bs)
     | VarType (Bound x) ->
         begin match IMap.find_opt x !newvars with
           | Some y -> VarType (Free y)
@@ -144,9 +174,19 @@ open Terms
 type semantic_error =
   | UnboundVariable of location * string
   | TypeMismatch    of { loc : location ; expected : typ ; found : typ }
+  | TypePatMismatch of { loc : location ; expected : typ ; found : typ }
 
 exception Sem_error of semantic_error
 
+let type_constant_term = function
+  | Bool _ -> ConstType BoolType
+  | Unit -> ConstType UnitType
+  | Int _ -> ConstType IntType
+
+let rec type_pattern newvar = function
+  | (_, TuplePat ps) -> TupleType (List.map (type_pattern newvar) ps)
+  | (_, ConstPat c) -> type_constant_term c
+  | (_, WildPat) -> newvar ()
 
 (* Type a λ-term using Hindley-Milner type inference (algorithm W) *)
 let type_term env term =
@@ -161,12 +201,37 @@ let type_term env term =
             raise (Sem_error err)
     in
     compose v rm
+  and type_term_list (acc : substitution * typ list) env = function
+    | [] -> (fst acc, List.rev (snd acc))
+    | m :: ms ->
+        let rm, a = w env m in
+        let env   = subst_env rm env in
+        let r     = compose rm (fst acc) in
+        let bs    = List.map (subst rm) (snd acc) in
+        type_term_list (r, a :: bs) env ms
+  and type_match_cases env acc type_pat type_arm = function
+    | ((loc, _ as pat), m) :: rest ->
+        let type_pat' = type_pattern newvar pat in
+        let rp =
+          try mgu type_pat type_pat' with
+            | Unify ->
+                raise (Sem_error
+                  (TypePatMismatch { loc ; expected = type_pat ; found = type_pat' }))
+        in
+        let env = subst_env rp env in
+        let type_arm = subst rp type_arm in
+        let rm = expect_type env m type_arm in
+        type_match_cases
+          (subst_env rm env)
+          (compose rm (compose rp acc))
+          (subst rm type_pat')
+          (subst rm type_arm)
+          rest
+    | [] -> (acc, type_arm)
+
   and w env (loc, term) =
     match term with
-      | Unit ->
-          ([], ConstType UnitType)
-      | Bool _ ->
-          ([], ConstType BoolType)
+      | Const c -> ([], type_constant_term c)
       | BinOp ((And | Or), m, n) ->
           let rm  = expect_type env m (ConstType BoolType) in
           let env = subst_env rm env in
@@ -177,6 +242,9 @@ let type_term env term =
           let env   = subst_env rm env in
           let rn    = expect_type env n a in
           (compose rn rm, ConstType BoolType)
+      | Tuple ms ->
+          let r, bs = type_term_list ([], []) env ms in
+          (r, TupleType bs)
       | IfElse { cond ; ifbr ; elsebr } ->
           let rm    = expect_type env cond (ConstType BoolType) in
           let env   = subst_env rm env in
@@ -184,6 +252,18 @@ let type_term env term =
           let env   = subst_env rn env in
           let ro    = expect_type env elsebr a in
           (compose ro (compose rn rm), subst ro a)
+      | Match { expr = m ; arms } ->
+          let rm, type_pat = w env m in
+          let type_arm = newvar () in
+          let rn, type_arm =
+            type_match_cases
+              (subst_env rm env)
+              []
+              type_pat
+              type_arm
+              arms
+          in
+          (compose rn rm, type_arm)
       (* (i) variable *)
       | Var x ->
           begin match SMap.find_opt x env with
