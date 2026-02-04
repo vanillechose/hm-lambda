@@ -21,6 +21,7 @@
     | Or
     | Other of char
     | RParen
+    | Semisemi
     | Then
     | True
     | Wildcard
@@ -48,6 +49,7 @@
     | Or        -> "'||'"
     | Other c   -> "character '" ^ (String.make 1 c) ^ "'"
     | RParen    -> "')'"
+    | Semisemi  -> "';;'"
     | Then      -> "'then'"
     | True      -> "'#t'"
     | Wildcard  -> "'_'"
@@ -76,6 +78,7 @@ rule token = parse
   | "#t" { True         }
   | "&&" { And          }
   | "->" { Arrow        }
+  | ";;" { Semisemi     }
   | "<>" { Neq          }
   | "||" { Or           }
   | '('  { LParen       }

@@ -32,8 +32,9 @@ val string_of_pattern : lpattern -> string
 val string_of_term : lterm -> string
 
 type parse_error =
-  | EmptyTerm   of location
-  | NoCases     of location
-  | SyntaxError of location * string
+  | EmptyTerm     of location
+  | NoCases       of location
+  | SyntaxError   of location * string
+  | UnexpectedEOF
 
 val parse : string -> (toplevel_item, parse_error) result

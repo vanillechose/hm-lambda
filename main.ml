@@ -1,7 +1,23 @@
+let extract_line source loc =
+  match
+    String.rindex_from_opt source loc '\n',
+    String.index_from_opt source loc '\n'
+  with
+    | None, None -> (0, String.length source)
+    | Some lo, None -> (lo + 1, String.length source)
+    | None, Some hi -> (0, hi)
+    | Some lo, Some hi -> (lo + 1, hi)
+
 let err_with_source source loc msg =
+  let lo, hi = extract_line source loc in
+  let line = String.sub source lo (hi - lo) in
+  let linenum =
+    let lines = String.split_on_char '\n' (String.sub source 0 lo) in
+    List.length lines
+  in
   Printf.eprintf "error: %s\n%!" msg ;
-  Printf.eprintf " %3d | %s\n%!" loc source ;
-  Printf.eprintf "     | %*s^\n%!" loc ""
+  Printf.eprintf " %3d | %s\n%!" linenum line ;
+  Printf.eprintf "     | %*s^\n%!" (loc - lo) ""
 
 let report_parse_error source = function
   | Terms.EmptyTerm loc ->
@@ -10,6 +26,8 @@ let report_parse_error source = function
       err_with_source source loc "this match expression has no arms"
   | Terms.SyntaxError (loc, msg) ->
       err_with_source source loc msg
+  | Terms.UnexpectedEOF ->
+      err_with_source source (String.length source - 1) "unexpected end of file"
 
 let report_semantic_error source = function
   | Typing.UnboundVariable (loc, name) ->
@@ -33,41 +51,43 @@ let show_trace      = ref false
 let print_eval_result name v typ =
   Printf.printf "%s : %s = %s\n%!" name (Typing.string_of_type typ) (Eval.string_of_value v)
 
-let interp source =
+let rec interp source =
   let r = Terms.parse source in
-  let r = Result.map_error (report_parse_error source) r in
-  Result.bind r (fun (LetDef(name, _) as item) ->
-    (* if !show_tree then begin
-      print_endline "=== TERM ===" ;
-      print_endline (Terms.string_of_term term) ;
-      print_endline "============" ;
-    end ; *)
+  (* multiline repl, try and read another line *)
+  if r = Error UnexpectedEOF then begin
+    if In_channel.isatty In_channel.stdin then
+      Printf.printf "    %!" ;
+    match read_line () with
+      | exception End_of_file -> print_newline () ; Error ()
+      | line -> interp (source ^ "\n" ^ line)
+  end else
+    let r = Result.map_error (report_parse_error source) r in
+    Result.bind r (fun (LetDef(name, _) as item) ->
+      let r = Typing.type_item !toplevel_env item in
+      let r = Result.map_error (report_semantic_error source) r in
+      Result.bind r (fun (typ, env) ->
+        toplevel_env := env ;
+        let (code, layout) = Codegen.codegen !codegen_layout item in
+        codegen_layout := layout ;
 
-    let r = Typing.type_item !toplevel_env item in
-    let r = Result.map_error (report_semantic_error source) r in
-    Result.bind r (fun (typ, env) ->
-      toplevel_env := env ;
-      let (code, layout) = Codegen.codegen !codegen_layout item in
-      codegen_layout := layout ;
+        if !show_tree then begin
+          print_endline "=== TREE ===" ;
+          print_endline (Eval.string_of_code code) ;
+          print_endline "============" ;
+        end ;
 
-      if !show_tree then begin
-        print_endline "=== TREE ===" ;
-        print_endline (Eval.string_of_code code) ;
-        print_endline "============" ;
-      end ;
-
-      let v = Eval.eval ~trace:!show_trace !interpreter_env code in
-      Result.bind v (fun v ->
-        let name =
-          match name with
-            | Some name -> interpreter_env := v :: !interpreter_env ; name
-            | None -> "-"
-        in
-        print_eval_result name v typ ;
-        Ok ()
+        let v = Eval.eval ~trace:!show_trace !interpreter_env code in
+        Result.bind v (fun v ->
+          let name =
+            match name with
+              | Some name -> interpreter_env := v :: !interpreter_env ; name
+              | None -> "-"
+          in
+          print_eval_result name v typ ;
+          Ok ()
+        )
       )
     )
-  )
 
 let dump_env () =
   List.iteri
@@ -91,6 +111,8 @@ let rec repl _ =
         repl ()
     | line when String.trim line = "#trace" ->
         toggle show_trace "show trace" ;
+        repl ()
+    | line when String.trim line = "" ->
         repl ()
     | line ->
         let _ = interp line in

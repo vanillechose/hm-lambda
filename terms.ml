@@ -99,9 +99,10 @@ let string_of_term (_, m) =
   F.string_of_t m
 
 type parse_error =
-  | EmptyTerm   of location
-  | NoCases     of location
-  | SyntaxError of location * string
+  | EmptyTerm     of location
+  | NoCases       of location
+  | SyntaxError   of location * string
+  | UnexpectedEOF
 
 (*
  * {{{ lang
@@ -166,7 +167,9 @@ let parse source =
     if t = t' then begin
       bump () ;
       ()
-    end else
+    end else if t' = Eof then
+      raise (Parse_error UnexpectedEOF)
+    else
       let msg = "expected " ^ string_of_token t ^ ", found " ^ string_of_token t' in
       raise (Parse_error (SyntaxError (loc (), msg)))
   in
@@ -174,6 +177,7 @@ let parse source =
   let expect_ident () =
     match tok () with
       | Ident x -> bump () ; x
+      | Eof -> raise (Parse_error UnexpectedEOF)
       | t ->
           let msg = "expected identifier, found " ^ string_of_token t in
           raise (Parse_error (SyntaxError (loc (), msg)))
@@ -211,9 +215,11 @@ let parse source =
             let m = parse_term () in
             let _ = expect RParen in
             m
+      | Eof ->
+          raise (Parse_error UnexpectedEOF)
       | t ->
           let msg =
-            "unexpected " ^ string_of_token t ^ "in expression, expected one of "
+            "unexpected " ^ string_of_token t ^ " in expression, expected one of "
             ^ "'#t', '#f', '(', identifier"
           in
           raise (Parse_error (SyntaxError (loc (), msg)))
@@ -223,7 +229,6 @@ let parse source =
       | And
       | Comma
       | Else
-      | Eof
       | Eq
       | In
       | Neq
@@ -231,7 +236,8 @@ let parse source =
       | Then
       | With
       | Case
-      | RParen ->
+      | RParen
+      | Semisemi ->
           reduce (loc ()) (List.rev stack)
       | _ -> let m = parse_atom () in parse_factor (m :: stack)
 
@@ -292,6 +298,8 @@ let parse source =
             let p = parse_tuple_pattern () in
             let _ = expect RParen in
             p
+      | Eof ->
+          raise (Parse_error UnexpectedEOF)
       | t ->
           let msg =
             "unexpected " ^ string_of_token t ^ " in pattern, expected one of "
@@ -318,6 +326,7 @@ let parse source =
           let _ = expect Arrow in
           let m = parse_term () in
           match_arms ((p, m) :: acc)
+      | Eof -> raise (Parse_error UnexpectedEOF)
       | _ -> List.rev acc
 
   and parse_term () =
@@ -377,14 +386,16 @@ let parse source =
             bump () ;
             let n = parse_term () in
             LetDef (None, (off, LetIn (name, m, n)))
-        | (Eof, _) ->
+        | (Semisemi, _) ->
             LetDef (name, m)
+        | (Eof, _) ->
+            raise (Parse_error UnexpectedEOF)
         | (t, _) ->
             let msg = "unexpected " ^ string_of_token t ^ ", expected end of file"
               ^ if name <> None then " or 'in'" else "" in
             raise (Parse_error (SyntaxError (loc (), msg)))
     in
-    expect Eof ;
+    expect Semisemi ;
     def
   in
   try Ok (parse_item ()) with Parse_error e -> Error e

@@ -4,15 +4,18 @@ Toy interpreter for a call-by-value λ-calculus with a Hindley-Milner
 type system, written in OCaml.
 
 ```
->>> (\f. f f) (\x. x)
+>>> (\f. f f) (\x. x) ;;
 error: this expression has type '_0 but type '_0 -> '_1 was expected
-   5 | (\f. f f) (\x. x)
+   1 | (\f. f f) (\x. x) ;;
      |      ^
->>> let id = let f = \x. x in f f
+>>> let id = let f = \x. x in f f ;;
 id : '2 -> '2 = <fun>
->>> let not = \x. x <> #t
+>>> let not = \x. match x with
+    case #t -> #f
+    case _ -> #t
+    ;;
 not : bool -> bool = <fun>
->>> not (id #t) = #f
+>>> not (id #t) = #f ;;
 - : bool = #t
 ```
 
@@ -24,7 +27,8 @@ The project can be built using `dune build`. Open the repl with `dune exec hm-la
 
 The following expressions are supported:
 
-- **Atomic expressions**: booleans (`#t` or `#f`), unit value (`()`) , variables
+- **Atomic expressions**: booleans (`#t` or `#f`), integers, unit value (`()`) , variables
+- **Tuples**: `6, 7`
 - **Lambda abstractions** of the form `\x. M`
 - **Function application**: `M N`
 - **Polymorphic equality test**: `M = N` or `M <> N`, `=` and `<>` are right-associative
@@ -33,6 +37,20 @@ always return false
 - **Boolean expressions**: `M && N` or `M || N`, `&&` and `||` are right-associative
 and have the same precedence
 - **if ... then ... else ...** expressions.
+- **pattern matching** on tuples, constant patterns and wildcards
+
+```
+>>> let f = \x. match x with
+        case _, #f, #t -> 1
+        case #f, #t, _ -> 2
+        case _, _, #f -> 3
+        case _, _, #t -> 4
+    ;;
+f : bool * bool * bool -> int = <fun>
+>>> f (#f, #t, #t) ;;
+- : int = 2
+```
+
 - **Let-in expressions**: `let x = M in N`
     - If `M` is well-typed, its type is generalized and `x` becomes a
     polymorphic object. Each occurrence of `x` in `N` will be typed with
@@ -51,8 +69,6 @@ top-level directives of the form `#directive`:
 
 ## Bugs / Todo
 
-- Multiline editing
-
 - Type and evaluate `let rec` bindings
 
 - Improve type inference. The type system, based on algorithm W as described in [1],
@@ -67,9 +83,9 @@ it will never be collected by OCaml's GC), but it is unreachable by subsequent
 hm-lambda code.
 
 ```
->>> let f = \x. x
+>>> let f = \x. x ;;
 f : '0 -> '0 = <fun>
->>> let f = ()
+>>> let f = () ;;
 f : unit = ()
 >>> #env
 0 = ()
