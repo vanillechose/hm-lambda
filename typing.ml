@@ -178,15 +178,15 @@ type semantic_error =
 
 exception Sem_error of semantic_error
 
-let type_constant_term = function
-  | Bool _ -> ConstType BoolType
-  | Unit -> ConstType UnitType
-  | Int _ -> ConstType IntType
+let type_atomic_value = function
+  | Abool _ -> ConstType BoolType
+  | Aunit -> ConstType UnitType
+  | Aint _ -> ConstType IntType
 
 let rec type_pattern newvar = function
-  | (_, TuplePat ps) -> TupleType (List.map (type_pattern newvar) ps)
-  | (_, ConstPat c) -> type_constant_term c
-  | (_, WildPat) -> newvar ()
+  | (_, Ptuplepat ps) -> TupleType (List.map (type_pattern newvar) ps)
+  | (_, Pconstpat c) -> type_atomic_value c
+  | (_, Pwildpat) -> newvar ()
 
 (* Type a λ-term using Hindley-Milner type inference (algorithm W) *)
 let type_term env term =
@@ -231,28 +231,28 @@ let type_term env term =
 
   and w env (loc, term) =
     match term with
-      | Const c -> ([], type_constant_term c)
-      | BinOp ((And | Or), m, n) ->
+      | Pconst c -> ([], type_atomic_value c)
+      | Pprim ((Oand | Oor), m, n) ->
           let rm  = expect_type env m (ConstType BoolType) in
           let env = subst_env rm env in
           let rn  = expect_type env n (ConstType BoolType) in
           (compose rn rm, ConstType BoolType)
-      | BinOp ((Eq | Neq), m, n) ->
+      | Pprim ((Oeq | Oneq), m, n) ->
           let rm, a = w env m in
           let env   = subst_env rm env in
           let rn    = expect_type env n a in
           (compose rn rm, ConstType BoolType)
-      | Tuple ms ->
+      | Ptuple ms ->
           let r, bs = type_term_list ([], []) env ms in
           (r, TupleType bs)
-      | IfElse { cond ; ifbr ; elsebr } ->
+      | Pifelse { cond ; ifbr ; elsebr } ->
           let rm    = expect_type env cond (ConstType BoolType) in
           let env   = subst_env rm env in
           let rn, a = w env ifbr in
           let env   = subst_env rn env in
           let ro    = expect_type env elsebr a in
           (compose ro (compose rn rm), subst ro a)
-      | Match { expr = m ; arms } ->
+      | Pmatch { expr = m ; arms } ->
           let rm, type_pat = w env m in
           let type_arm = newvar () in
           let rn, type_arm =
@@ -265,19 +265,19 @@ let type_term env term =
           in
           (compose rn rm, type_arm)
       (* (i) variable *)
-      | Var x ->
+      | Pvar x ->
           begin match SMap.find_opt x env with
             | Some a -> ([], instantiate a)
             | None -> raise (Sem_error (UnboundVariable (loc, x)))
           end
       (* (iii) abstractions *)
-      | Abs (x, m) ->
+      | Plambda (x, m) ->
           let a    = newvar () in
           let env  = bind x a env in
           let r, b = w env m in
           (r, ArrType (subst r a, b))
       (* (ii) applications *)
-      | App ((loc, _ as m), n) ->
+      | Papp ((loc, _ as m), n) ->
           let rm, a = w env m in
           let env   = subst_env rm env in
           let rn, b = w env n in
@@ -292,7 +292,7 @@ let type_term env term =
           in
           (compose v (compose rn rm), subst v c)
       (* (iv) let bindings *)
-      | LetIn (x, m, n) ->
+      | Pletin (x, m, n) ->
           let rm, a = w env m in
           let env   = subst_env rm env in
           let env   = bind_let x a env in
@@ -307,13 +307,13 @@ let type_expression env term =
     | Error e -> Error e
 
 let type_item env = function
-  | LetDef (Some name, term) ->
+  | Pletdef (Some name, term) ->
       let r = type_expression env term in
       Result.map (fun (typ, env) ->
         let env = bind_let name typ env in
         (SMap.find name env, env)
       ) r
-  | LetDef (None, term) ->
+  | Pletdef (None, term) ->
       let r = type_expression env term in
       Result.map (fun (typ, env) -> (generalize env typ, env)) r
 

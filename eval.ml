@@ -1,9 +1,9 @@
 type code =
-  | Load      of value
+  | Quote     of value
   | Var       of int
   | Abs       of code
   | App       of code * code
-  | Op        of Terms.operator * code * code
+  | Op        of Terms.atomic_op * code * code
   | Branch    of { cond : code ; ifbr : code ; elsebr : code }
   | Fail      of string
   | MakeBlock of code list
@@ -23,16 +23,16 @@ let string_of_value = function
   | Closure _ -> "<fun>"
   | Block vs -> "<block of " ^ string_of_int (List.length vs) ^ " values>"
 
-let string_of_operator = function
-  | Terms.And -> "and"
-  | Terms.Eq  -> "eq?"
-  | Terms.Neq -> "neq?"
-  | Terms.Or  -> "or"
+let string_of_operator : Terms.atomic_op -> string = function
+  | Oand -> "and"
+  | Oeq  -> "eq?"
+  | Oneq -> "neq?"
+  | Oor  -> "or"
 
 let string_of_code code =
   let ws k = String.make (2 * k) ' ' in
   let rec aux depth = function
-    | Load v -> ws depth ^ "load " ^ string_of_value v
+    | Quote v -> ws depth ^ "load " ^ string_of_value v
     | Var n -> ws depth ^ "var " ^ string_of_int n
     | Abs m -> ws depth ^ "closure\n" ^ aux (depth + 1) m
     | App (m, n) ->
@@ -73,7 +73,7 @@ let eval ?(trace=false) env code =
    * it should not cause any problem *)
   let[@ocaml.warning "-8"] rec aux depth env code =
     match code with
-    | Load v ->
+    | Quote v ->
         print_trace depth ("load = " ^ string_of_value v) ;
         v
     | Var n ->
@@ -92,24 +92,24 @@ let eval ?(trace=false) env code =
         let v = aux (depth + 1) (arg :: e) c in
         print_trace depth ("} = " ^ string_of_value v) ;
         v
-    | Op ((And | Or as f), m, n) ->
+    | Op ((Oand | Oor as f), m, n) ->
         let Bool u = aux depth env m in
         (* short circuit *)
-        if (f = Or) = u then begin
+        if (f = Oor) = u then begin
           print_trace depth (string_of_operator f ^ "(short) = " ^ string_of_value (Bool u)) ;
           Bool u
         end else
           let Bool v = aux depth env n in
-          let w = if f = And then Bool (u && v) else Bool (u || v) in
+          let w = if f = Oand then Bool (u && v) else Bool (u || v) in
           print_trace depth (string_of_operator f ^ " = " ^ string_of_value w) ;
           w
-    | Op ((Eq | Neq as f), m, n) ->
+    | Op ((Oeq | Oneq as f), m, n) ->
         let u = aux depth env m in
         let v = aux depth env n in
         let w =
           begin match u with
             | Closure _ -> Bool false
-            | _ -> Bool (if f = Eq then u = v else u <> v)
+            | _ -> Bool (if f = Oeq then u = v else u <> v)
           end
         in
         print_trace depth (string_of_operator f ^ " = " ^ string_of_value w) ;

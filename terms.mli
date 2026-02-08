@@ -1,32 +1,35 @@
 type location = int
 
-type operator =
-  | And
-  | Eq
-  | Neq
-  | Or
+type atomic_op =
+  | Oand
+  | Oeq
+  | Oneq
+  | Oor
 
-type const_term = Unit | Bool of bool | Int of int
+type atomic_val =
+  | Aunit
+  | Abool of bool
+  | Aint  of int
 
 type pattern =
-  | ConstPat of const_term
-  | TuplePat of lpattern list
-  | WildPat
+  | Pconstpat of atomic_val
+  | Ptuplepat of lpattern list
+  | Pwildpat
 and lpattern = location * pattern
 
 type term =
-  | Const   of const_term
-  | Var     of string
-  | App     of lterm * lterm
-  | BinOp   of operator * lterm * lterm
-  | Tuple   of lterm list
-  | IfElse  of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
-  | Match   of { expr : lterm ; arms : (lpattern * lterm) list }
-  | Abs     of string * lterm
-  | LetIn   of string * lterm * lterm
+  | Pconst  of atomic_val
+  | Pvar    of string
+  | Papp    of lterm * lterm
+  | Pprim   of atomic_op * lterm * lterm
+  | Ptuple  of lterm list
+  | Pifelse of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
+  | Pmatch  of { expr : lterm ; arms : (lpattern * lterm) list }
+  | Plambda of string * lterm
+  | Pletin  of string * lterm * lterm
 and lterm = location * term
 
-type toplevel_item = LetDef of string option * lterm
+type toplevel_item = Pletdef of string option * lterm
 
 val string_of_pattern : lpattern -> string
 val string_of_term : lterm -> string

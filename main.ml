@@ -62,7 +62,7 @@ let rec interp source =
       | line -> interp (source ^ "\n" ^ line)
   end else
     let r = Result.map_error (report_parse_error source) r in
-    Result.bind r (fun (LetDef(name, _) as item) ->
+    Result.bind r (fun (Pletdef(name, _) as item) ->
       let r = Typing.type_item !toplevel_env item in
       let r = Result.map_error (report_semantic_error source) r in
       Result.bind r (fun (typ, env) ->

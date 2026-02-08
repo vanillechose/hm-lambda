@@ -1,33 +1,36 @@
 type location = int
 
-type operator =
-  | And
-  | Eq
-  | Neq
-  | Or
+type atomic_op =
+  | Oand
+  | Oeq
+  | Oneq
+  | Oor
 
-type const_term = Unit | Bool of bool | Int of int
+type atomic_val =
+  | Aunit
+  | Abool of bool
+  | Aint  of int
 
 type pattern =
-  | ConstPat of const_term
-  | TuplePat of lpattern list
-  | WildPat
-and lpattern =location * pattern
+  | Pconstpat of atomic_val
+  | Ptuplepat of lpattern list
+  | Pwildpat
+and lpattern = location * pattern
 
 type term =
-  | Const   of const_term
-  | Var     of string
-  | App     of lterm * lterm
-  | BinOp   of operator * lterm * lterm
-  | Tuple   of lterm list
-  | IfElse  of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
-  | Match   of { expr : lterm ; arms : (lpattern * lterm) list }
-  | Abs     of string * lterm
-  | LetIn   of string * lterm * lterm
+  | Pconst  of atomic_val
+  | Pvar    of string
+  | Papp    of lterm * lterm
+  | Pprim   of atomic_op * lterm * lterm
+  | Ptuple  of lterm list
+  | Pifelse of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
+  | Pmatch  of { expr : lterm ; arms : (lpattern * lterm) list }
+  | Plambda of string * lterm
+  | Pletin  of string * lterm * lterm
 and lterm = location * term
 
 type toplevel_item =
-  | LetDef of string option * lterm
+  | Pletdef of string option * lterm
 
 let string_of_pattern (_, p) =
   let module Info =
@@ -37,12 +40,12 @@ let string_of_pattern (_, p) =
       open Termfmt
 
       let term_info = function
-        | ConstPat Int k -> Constant (string_of_int k)
-        | ConstPat Unit -> Constant "()"
-        | ConstPat Bool x -> Constant ("#" ^ if x then "t" else "f")
-        | WildPat -> Constant "_"
-        | TuplePat [] -> Constant "<empty tuple>"
-        | TuplePat ((_, p) :: ps)->
+        | Pconstpat Aint k -> Constant (string_of_int k)
+        | Pconstpat Aunit -> Constant "()"
+        | Pconstpat Abool x -> Constant ("#" ^ if x then "t" else "f")
+        | Pwildpat -> Constant "_"
+        | Ptuplepat [] -> Constant "<empty tuple>"
+        | Ptuplepat ((_, p) :: ps)->
             Nary { prec = 2 ; prefix = "" ; head = p ;
               suffix = "" ; children = List.map (fun (_, n) -> (", ", n)) ps }          
     end
@@ -58,34 +61,34 @@ let string_of_term (_, m) =
       open Termfmt
 
       let term_info = function
-        | Const Int k -> Constant (string_of_int k)
-        | Const Unit -> Constant "()"
-        | Const Bool x -> Constant ("#" ^ if x then "t" else "f")
-        | Var x -> Constant x
+        | Pconst Aint k -> Constant (string_of_int k)
+        | Pconst Aunit -> Constant "()"
+        | Pconst Abool x -> Constant ("#" ^ if x then "t" else "f")
+        | Pvar x -> Constant x
 
-        | App ((_, left), (_, right)) ->
+        | Papp ((_, left), (_, right)) ->
             Binary { prec = 41 ; assoc = Left ; left ;
               infix = " " ; right }
-        | BinOp ((Neq | Eq as f), (_, left), (_, right)) ->
+        | Pprim ((Oneq | Oeq as f), (_, left), (_, right)) ->
             Binary { prec = 41 ; assoc = Right ; left ;
-              infix = if f = Eq then " = " else " <> " ; right }
-        | BinOp ((And | Or as f), (_, left), (_, right)) ->
+              infix = if f = Oeq then " = " else " <> " ; right }
+        | Pprim ((Oand | Oor as f), (_, left), (_, right)) ->
             Binary { prec = 21 ; assoc = Right ; left ;
-              infix = if f = And then " && " else " || " ; right }
-        | Tuple [] -> Constant "<empty tuple>"
-        | Tuple ((_, m) :: ns) ->
+              infix = if f = Oand then " && " else " || " ; right }
+        | Ptuple [] -> Constant "<empty tuple>"
+        | Ptuple ((_, m) :: ns) ->
             Nary { prec = 19 ; prefix = "" ; head = m ;
               suffix = "" ; children = List.map (fun (_, n) -> (", ", n)) ns }
 
-        | IfElse { cond = (_, m) ; ifbr = (_, n) ; elsebr = (_, o) } ->
+        | Pifelse { cond = (_, m) ; ifbr = (_, n) ; elsebr = (_, o) } ->
             Nary { prec = 1 ; prefix = "if " ; head = m ;
               suffix = "" ; children = [ " then ", n ; " else ", o ] }
-        | Abs (x, (_, m)) ->
+        | Plambda (x, (_, m)) ->
             Unary { prec = 1 ; prefix = "\\" ^ x ^ ". " ; suffix = m }
-        | LetIn (x, (_, m), (_, n)) ->
+        | Pletin (x, (_, m), (_, n)) ->
             Nary { prec = 1 ; prefix = "let " ^ x ^ " = " ; head = m ;
               suffix = "" ; children = [ " in ", n ] }
-        | Match { expr = (_, m) ; arms } ->
+        | Pmatch { expr = (_, m) ; arms } ->
             let children =
               List.map (fun (p, (_, n)) ->
                 ("\ncase " ^ string_of_pattern p ^ " -> ", n)
@@ -184,7 +187,7 @@ let parse source =
   in
   (* }}} *)
 
-  let make_app (off, _ as m) n = (off, App (m, n)) in
+  let make_app (off, _ as m) n = (off, Papp (m, n)) in
 
   let reduce start = function
     | [] -> raise (Parse_error (EmptyTerm start))
@@ -196,13 +199,13 @@ let parse source =
       | True | False as b ->
           let off = loc () in
           bump () ;
-          (off, Const (Bool (b = True)))
+          (off, Pconst (Abool (b = True)))
       | Ident x ->
-          let  m  = (loc (), Var x) in
+          let  m  = (loc (), Pvar x) in
           bump () ;
           m
       | Integer k ->
-          let m = (loc (), Const (Int k)) in
+          let m = (loc (), Pconst (Aint k)) in
           bump () ;
           m
       | LParen ->
@@ -210,7 +213,7 @@ let parse source =
           bump () ;
           if tok () = RParen then begin
             bump () ;
-            (off, Const Unit)
+            (off, Pconst Aunit)
           end else
             let m = parse_term () in
             let _ = expect RParen in
@@ -248,8 +251,8 @@ let parse source =
           let off = loc () in
           bump () ;
           let n   = parse_test () in
-          let op  = (if f = Eq then Eq else Neq : operator) in
-          (off, BinOp (op, m, n))
+          let op  = (if f = Eq then Oeq else Oneq : atomic_op) in
+          (off, Pprim (op, m, n))
       | _ -> m
 
   and parse_expr () =
@@ -259,8 +262,8 @@ let parse source =
           let off = loc () in
           bump () ;
           let n   = parse_expr () in
-          let op  = (if f = And then And else Or : operator) in
-          (off, BinOp (op, m, n))
+          let op  = (if f = And then Oand else Oor : atomic_op) in
+          (off, Pprim (op, m, n))
       | _ -> m
 
   and parse_tuple () =
@@ -269,8 +272,8 @@ let parse source =
       | Comma ->
           bump () ;
           begin match tok (), parse_tuple () with
-            | t, (_, Tuple ms) when t <> LParen -> (fst m, Tuple (m :: ms))
-            | _, n -> (fst m, Tuple [ m ; n ])
+            | t, (_, Ptuple ms) when t <> LParen -> (fst m, Ptuple (m :: ms))
+            | _, n -> (fst m, Ptuple [ m ; n ])
           end
       | _ -> m
 
@@ -279,21 +282,21 @@ let parse source =
       | True | False as b ->
           let off = loc () in
           bump () ;
-          (off, ConstPat (if b = True then Bool true else Bool false))
+          (off, Pconstpat (if b = True then Abool true else Abool false))
       | Integer k ->
           let off = loc () in
           bump () ;
-          (off, ConstPat (Int k))
+          (off, Pconstpat (Aint k))
       | Wildcard ->
           let off = loc () in
           bump () ;
-          (off, WildPat)
+          (off, Pwildpat)
       | LParen ->
           let off = loc () in
           bump () ;
           if tok () = RParen then begin
             bump () ;
-            (off, ConstPat Unit)
+            (off, Pconstpat Aunit)
           end else
             let p = parse_tuple_pattern () in
             let _ = expect RParen in
@@ -313,8 +316,8 @@ let parse source =
       | Comma ->
           bump () ;
           begin match tok (), parse_tuple_pattern () with
-            | t, (_, TuplePat ps) when t <> LParen -> (fst p, TuplePat (p :: ps))
-            | _, q -> (fst p, TuplePat [ p ; q ])
+            | t, (_, Ptuplepat ps) when t <> LParen -> (fst p, Ptuplepat (p :: ps))
+            | _, q -> (fst p, Ptuplepat [ p ; q ])
           end
       | _ -> p
 
@@ -339,14 +342,14 @@ let parse source =
           let m    = parse_term () in
           let _    = expect In in
           let n    = parse_term () in
-          (off, LetIn (name, m, n))
+          (off, Pletin (name, m, n))
       | Lambda ->
           let off = loc () in
           bump () ;
           let name = expect_ident () in
           let _    = expect Dot in
           let m    = parse_term () in
-          (off, Abs (name, m))
+          (off, Plambda (name, m))
       | If ->
           let off = loc () in
           bump () ;
@@ -355,7 +358,7 @@ let parse source =
           let ifbr   = parse_term () in
           let _      = expect Else in
           let elsebr = parse_term () in
-          (off, IfElse { cond ; ifbr ; elsebr })
+          (off, Pifelse { cond ; ifbr ; elsebr })
       | Match ->
           let off  = loc () in
           bump () ;
@@ -365,7 +368,7 @@ let parse source =
           if arms = [] then
             raise (Parse_error (NoCases off))
           else
-            (off, Match { expr = m ; arms })
+            (off, Pmatch { expr = m ; arms })
       | _ -> parse_tuple ()
   
   and parse_item () =
@@ -385,9 +388,9 @@ let parse source =
         | (In, Some name) ->
             bump () ;
             let n = parse_term () in
-            LetDef (None, (off, LetIn (name, m, n)))
+            Pletdef (None, (off, Pletin (name, m, n)))
         | (Semisemi, _) ->
-            LetDef (name, m)
+            Pletdef (name, m)
         | (Eof, _) ->
             raise (Parse_error UnexpectedEOF)
         | (t, _) ->

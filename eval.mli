@@ -1,11 +1,11 @@
 (* tree-walk interpreter code: λ-terms represented using de Bruijn indices *)
 type code =
-  | Load      of value
+  | Quote     of value
   | Var       of int
   | Abs       of code
   | App       of code * code
   (* Arithmetic operations *)
-  | Op        of Terms.operator * code * code
+  | Op        of Terms.atomic_op * code * code
   | Branch    of { cond : code ; ifbr : code ; elsebr : code }
   | Fail      of string
   | MakeBlock of code list
