@@ -14,6 +14,7 @@ type atomic_val =
 type pattern =
   | Pconstpat of atomic_val
   | Ptuplepat of lpattern list
+  | Pvarpat   of string
   | Pwildpat
 and lpattern = location * pattern
 

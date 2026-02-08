@@ -14,6 +14,7 @@ type atomic_val =
 type pattern =
   | Pconstpat of atomic_val
   | Ptuplepat of lpattern list
+  | Pvarpat   of string
   | Pwildpat
 and lpattern = location * pattern
 
@@ -43,6 +44,7 @@ let string_of_pattern (_, p) =
         | Pconstpat Aint k -> Constant (string_of_int k)
         | Pconstpat Aunit -> Constant "()"
         | Pconstpat Abool x -> Constant ("#" ^ if x then "t" else "f")
+        | Pvarpat x -> Constant x
         | Pwildpat -> Constant "_"
         | Ptuplepat [] -> Constant "<empty tuple>"
         | Ptuplepat ((_, p) :: ps)->
@@ -287,6 +289,10 @@ let parse source =
           let off = loc () in
           bump () ;
           (off, Pconstpat (Aint k))
+      | Ident x ->
+          let off = loc () in
+          bump () ;
+          (off, Pvarpat x)
       | Wildcard ->
           let off = loc () in
           bump () ;

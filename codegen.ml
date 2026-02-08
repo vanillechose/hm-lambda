@@ -116,7 +116,7 @@ and compile_selected_pattern paths matrix =
         let compiled_cases =
           List.map (fun (cst, matrix) -> (cst, compile_matrix paths matrix)) cases
         in
-        (* if the set of pattern in the first row form a signature, the default
+        (* if the set of pattern in the first column form a signature, the default
          * matrix is not needed, it is safe to replace it with the last case *)
         if is_signature (List.map fst cases) then
           let (_, default), compiled_cases = remove (List.length cases - 1) compiled_cases in
