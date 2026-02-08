@@ -16,12 +16,17 @@ and value =
   | Closure of code * env
 and env = value list
 
-let string_of_value = function
+let rec string_of_value = function
   | Unit -> "()"
   | Bool b -> "#" ^ if b then "t" else "f"
   | Int k -> string_of_int k
   | Closure _ -> "<fun>"
-  | Block vs -> "<block of " ^ string_of_int (List.length vs) ^ " values>"
+  | Block [] -> "<empty block>"
+  | Block (v :: []) -> "<block containing " ^ string_of_value v ^ ">"
+  | Block (v :: vs) ->
+      "(" ^ List.fold_left (fun x y ->
+        x ^ ", " ^ string_of_value y
+      ) (string_of_value v) vs ^ ")"
 
 let string_of_operator : Terms.atomic_op -> string = function
   | Oand -> "and"

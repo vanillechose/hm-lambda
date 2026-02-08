@@ -172,9 +172,10 @@ let subst_env r env =
 open Terms
 
 type semantic_error =
-  | UnboundVariable of location * string
-  | TypeMismatch    of { loc : location ; expected : typ ; found : typ }
-  | TypePatMismatch of { loc : location ; expected : typ ; found : typ }
+  | UnboundVariable  of location * string
+  | TypeMismatch     of { loc : location ; expected : typ ; found : typ }
+  | TypePatMismatch  of { loc : location ; expected : typ ; found : typ }
+  | DuplicateBinding of { loc : location ; name : string ; pattern : lpattern }
 
 exception Sem_error of semantic_error
 
@@ -183,10 +184,20 @@ let type_atomic_value = function
   | Aunit -> ConstType UnitType
   | Aint _ -> ConstType IntType
 
-let rec type_pattern newvar = function
-  | (_, Ptuplepat ps) -> TupleType (List.map (type_pattern newvar) ps)
+let pattern_variables = ref SMap.empty
+
+(* type_pattern_rec top _ pat
+ * pat is a subpattern of top, this is used for error reporting *)
+let rec type_pattern_rec top newvar = function
+  | (_, Ptuplepat ps) -> TupleType (List.map (type_pattern_rec top newvar) ps)
   | (_, Pconstpat c) -> type_atomic_value c
-  | (_, Pvarpat _) -> failwith "not implemented"
+  | (loc, Pvarpat name) ->
+      if SMap.mem name !pattern_variables then
+        raise (Sem_error (DuplicateBinding { loc ; name ; pattern = top })) ;
+      (* collect pattern variables *)
+      let a = newvar () in
+      pattern_variables := SMap.add name a !pattern_variables ;
+      a
   | (_, Pwildpat) -> newvar ()
 
 (* Type a λ-term using Hindley-Milner type inference (algorithm W) *)
@@ -210,29 +221,33 @@ let type_term env term =
         let r     = compose rm (fst acc) in
         let bs    = List.map (subst rm) (snd acc) in
         type_term_list (r, a :: bs) env ms
-  and type_match_patterns acc type_pat = function
-    | (loc, _ as pat) :: rest ->
-        let type_pat' = type_pattern newvar pat in
-        let rp =
-          try mgu type_pat type_pat' with
-            | Unify ->
-                raise (Sem_error
-                  (TypePatMismatch { loc ; expected = type_pat ; found = type_pat' }))
-        in
-        type_match_patterns (compose rp acc) type_pat' rest
-    | [] -> acc (* discard type_pat, not needed thereafter *)
-  and type_match_arms env acc type_arm = function
-    | m :: rest ->
-        let rm = expect_type env m type_arm in
-        let env = subst_env rm env in
-        type_match_arms env (compose rm acc) (subst rm type_arm) rest
-    | [] -> (acc, type_arm)
-  and type_match_cases env type_pat cases =
-    let (ps, ms) = List.split cases in
-    let rp = type_match_patterns [] type_pat ps in
+
+  and type_pattern env type_pat (loc, _ as pat) =
+    pattern_variables := SMap.empty ;
+    let type_pat' = type_pattern_rec pat newvar pat in
+    let rp =
+      try mgu type_pat type_pat' with
+        | Unify ->
+            raise (Sem_error
+              (TypePatMismatch { loc ; expected = type_pat ; found = type_pat' }))
+    in
     let env = subst_env rp env in
-    let (rm, a) = type_match_arms env [] (newvar ()) ms in
-    (compose rm rp, a)
+    let pvars = SMap.map (subst rp) !pattern_variables in
+    (rp, (subst rp type_pat'), SMap.union (fun _ _ a -> Some a) env pvars)
+  and type_match_cases env acc type_pat type_arm = function
+    | (p, m) :: rest ->
+        let (rp, type_pat, arm_env) = type_pattern env type_pat p in
+        let type_arm = (subst rp type_arm) in
+        let rm = expect_type arm_env m type_arm in
+        let acc = compose rm (compose rp acc) in
+        type_match_cases
+          (subst_env acc env)
+          acc
+          (subst rm type_pat)
+          (subst rm type_arm)
+          rest
+    | [] -> (acc, type_arm)
+
   and w env (loc, term) =
     match term with
       | Pconst c -> ([], type_atomic_value c)
@@ -258,7 +273,8 @@ let type_term env term =
           (compose ro (compose rn rm), subst ro a)
       | Pmatch { expr = m ; arms } ->
           let rm, type_pat = w env m in
-          let (rn, a) = type_match_cases (subst_env rm env) type_pat arms in
+          let type_arm = newvar () in
+          let (rn, a) = type_match_cases (subst_env rm env) [] type_pat type_arm arms in
           (compose rn rm, a)
       (* (i) variable *)
       | Pvar x ->

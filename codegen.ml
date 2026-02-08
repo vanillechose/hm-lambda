@@ -22,7 +22,7 @@ let idx name layout =
   layout.count - n
 
 (* === pattern matching to decision trees === *)
-type action = lterm
+type action = lpattern * lterm
 type row    = lpattern list * action
 type matrix = row list
 
@@ -45,9 +45,13 @@ let select_column i paths matrix =
   let matrix = List.map (fun (ps, act) -> (swap i ps, act)) matrix in
   (paths, matrix)
 
+let is_refutable = function
+  | (_, (Pwildpat | Pvarpat _)) -> false
+  | _ -> true
+
 let find_first_non_wildcard : matrix -> int option = function
   | [] -> None
-  | (ps, _) :: _ -> List.find_index (fun (_, p) -> p <> Pwildpat) ps
+  | (ps, _) :: _ -> List.find_index is_refutable ps
 
 let specialize_by_constant (matrix : matrix) =
   let append_row cst ps act cases =
@@ -64,7 +68,7 @@ let specialize_by_constant (matrix : matrix) =
             | Pconstpat cst ->
                 append_row cst rest act cases ;
                 fold rows' cases default
-            | Pwildpat ->
+            | (Pwildpat | Pvarpat _) ->
                 List.iter (fun (_, rows) -> rows := (rest, act) :: !rows) !cases ;
                 fold rows' cases ((rest, act) :: default)
             | _ -> failwith "invalid pattern (no constructor in column)"
@@ -82,7 +86,8 @@ let specialize_tuple arity (matrix : matrix) =
     match ps with
       | (_, Ptuplepat ps) :: rest ->
           (ps @ rest, action)
-      | (off, Pwildpat) :: rest ->
+      | (off, (Pwildpat | Pvarpat _)) :: rest ->
+          (* replacing Pvarpat _ with Pwildpat should not matter ? *)
           let ps = List.init arity (fun _ -> (off, Pwildpat)) in
           (ps @ rest, action)
       | _ -> failwith "invalid pattern (tuple unpacking)"
@@ -124,19 +129,51 @@ and compile_selected_pattern paths matrix =
         else
           let compiled_default = compile_matrix paths default in
           Switch (path, compiled_cases, compiled_default)
-    | _ :: _, ((_, Pwildpat) :: _, act) :: _ ->
-        (* the whole line is filled with wildcards *)
+    | _ :: _, ((_, (Pwildpat | Pvarpat _)) :: _, act) :: _ ->
+        (* the whole line is filled with refutable patterns *)
         Leaf act
     | _ -> failwith "invalid pattern (selected column doesn't match any of the cases)"
 
 (* === actual code generation === *)
-
 let quote_atomic_value = function
   | Aunit   -> Quote Unit
   | Abool x -> Quote (Bool x)
   | Aint k  -> Quote (Int k)
 
-let rec codegen_term layout (_, term) =
+let rec collect_pattern_variables path = function
+  | (_, Pvarpat x) -> [ x, path ]
+  | (_, Ptuplepat ps) ->
+      let paths_patterns = List.mapi (fun k pat -> (Access (k, path), pat)) ps in
+      List.fold_left (fun acc (path, pat) ->
+        collect_pattern_variables path pat @ acc
+      ) [] paths_patterns
+  | _ -> []
+
+let rec shift_access_path shift = function
+  | Access (k, (Access _ | Var _ as c)) -> Access (k, shift_access_path shift c)
+  | Var x -> Var (x + shift)
+  | _ -> failwith "invalid access path"
+
+(* basically compiles case P(x) -> m as (\. m) C where P(x) is a pattern
+ * binding x and C is the code used to access the value of x *)
+let rec codegen_match_arm layout pattern term =
+  (* we're always matching against Var 0 (Pmatch in codegen_term) *)
+  let vars_paths = collect_pattern_variables (Var 0) pattern in
+  let (vars, paths) = List.split vars_paths in
+  let arm_layout =
+    (* we would like vars[k] to live in the kth slot of arm_layout... *)
+    List.fold_right (fun x acc -> bind x acc) vars layout
+  in
+  let nvars = List.length vars in
+  (* ...the value matched against the pattern is in slot nvars of arm_layout *)
+  (* so vars[k] accesses its base value using Var (nvars - 1 - k) *)
+  let paths = List.mapi (fun k c -> shift_access_path (nvars - 1 - k) c) paths in
+  let code = codegen_term arm_layout term in
+  List.fold_left (fun acc path ->
+    App (Abs acc, path)
+  ) code paths
+
+and codegen_term layout (_, term) =
   match term with
     | Pconst x -> quote_atomic_value x
     | Pvar x -> Var (idx x layout)
@@ -146,8 +183,9 @@ let rec codegen_term layout (_, term) =
     (* let x = M in N ~> (\x. N) M *)
     | Pletin (x, m, n) -> App (Abs (codegen_term (bind x layout) n), codegen_term layout m)
     | Ptuple ms -> MakeBlock (List.map (codegen_term layout) ms)
+    (* match m with DT ~> (\x. DT x) m *)
     | Pmatch { expr ; arms } ->
-        let matrix = List.map (fun (p, m) -> [ p ], m) arms in
+        let matrix = List.map (fun (p, m) -> [ p ], (p, m)) arms in
         let dt = compile_matrix [ Var 0 ] matrix in
         let fn = Abs (codegen_decision_tree (reserve layout) dt) in
         App (fn, codegen_term layout expr)
@@ -159,7 +197,7 @@ let rec codegen_term layout (_, term) =
 
 and codegen_decision_tree layout = function
   | Fail -> Fail "match failure"
-  | Leaf action -> codegen_term layout action
+  | Leaf (pattern, action) -> codegen_match_arm layout pattern action
   | Switch (path, cases, def) ->
       List.fold_right (fun (cst, dt) acc ->
         let ifbr = codegen_decision_tree layout dt in

@@ -40,6 +40,10 @@ let report_semantic_error source = function
       let msg = "this pattern has type " ^ Typing.string_of_type found ^ " but type "
         ^ Typing.string_of_type expected ^ " was expected" in
       err_with_source source loc msg
+  | Typing.DuplicateBinding { loc ; name ; pattern } ->
+      let msg = "variable " ^ name ^ " is bound more than once in pattern "
+        ^ Terms.string_of_pattern pattern in
+      err_with_source source loc msg
 
 (* repl state *)
 let toplevel_env    = ref Typing.empty_env

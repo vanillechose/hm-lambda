@@ -37,7 +37,7 @@ always return false
 - **Boolean expressions**: `M && N` or `M || N`, `&&` and `||` are right-associative
 and have the same precedence
 - **if ... then ... else ...** expressions.
-- **pattern matching** on tuples, constant patterns and wildcards
+- **pattern matching** on tuples, constant patterns, variable patterns and wildcards
 
 ```
 >>> let f = \x. match x with
@@ -49,6 +49,10 @@ and have the same precedence
 f : bool * bool * bool -> int = <fun>
 >>> f (#f, #t, #t) ;;
 - : int = 2
+>>> let fst = \p. match p with case (x, _) -> x ;;
+fst : '1 * '3 -> '1 = <fun>
+>>> fst (#t, #f) ;;
+- : bool = #t
 ```
 
 - **Let-in expressions**: `let x = M in N`
