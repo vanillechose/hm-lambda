@@ -10,13 +10,15 @@ type code =
   | Fail      of string
   | MakeBlock of code list
   | Access    of int * code
+  | LetRec    of code
 and value = 
   | Unit
   | Bool    of bool
   | Int     of int
   | Block   of value list
   | Closure of code * env
-and env = value list
+and cell = value ref
+and env = cell list
 
 val string_of_value : value -> string
 val string_of_code : code -> string

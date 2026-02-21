@@ -17,12 +17,16 @@
     | Lambda
     | Let
     | Match
+    | Minus
     | Neq
     | Or
     | Other of char
+    | Plus
+    | Rec
     | RParen
     | Semisemi
     | Then
+    | Times
     | True
     | Wildcard
     | With
@@ -45,12 +49,16 @@
     | Lambda    -> "'\\'"
     | Let       -> "'let'"
     | Match     -> "'match'"
+    | Minus     -> "'-'"
     | Neq       -> "'<>'"
     | Or        -> "'||'"
     | Other c   -> "character '" ^ (String.make 1 c) ^ "'"
+    | Plus      -> "'+'"
     | RParen    -> "')'"
+    | Rec       -> "'rec'"
     | Semisemi  -> "';;'"
     | Then      -> "'then'"
+    | Times     -> "'*'"
     | True      -> "'#t'"
     | Wildcard  -> "'_'"
     | With      -> "'with'"
@@ -62,6 +70,7 @@
     | "in"    -> In
     | "let"   -> Let
     | "match" -> Match
+    | "rec"   -> Rec
     | "then"  -> Then
     | "with"  -> With
     | "_"     -> Wildcard
@@ -83,7 +92,10 @@ rule token = parse
   | "||" { Or           }
   | '('  { LParen       }
   | ')'  { RParen       }
+  | '*'  { Times        }
+  | '+'  { Plus         }
   | ','  { Comma        }
+  | '-'  { Minus        }
   | '.'  { Dot          }
   | '='  { Eq           }
   | '\\' { Lambda       }

@@ -8,13 +8,15 @@ type code =
   | Fail      of string
   | MakeBlock of code list
   | Access    of int * code
+  | LetRec    of code
 and value =
   | Unit
   | Bool    of bool
   | Int     of int
   | Block   of value list
   | Closure of code * env
-and env = value list
+and cell = value ref
+and env = cell list
 
 let rec string_of_value = function
   | Unit -> "()"
@@ -29,8 +31,11 @@ let rec string_of_value = function
       ) (string_of_value v) vs ^ ")"
 
 let string_of_operator : Terms.atomic_op -> string = function
+  | Oadd -> "add"
+  | Osub -> "sub"
   | Oand -> "and"
   | Oeq  -> "eq?"
+  | Omul -> "mul"
   | Oneq -> "neq?"
   | Oor  -> "or"
 
@@ -64,6 +69,8 @@ let string_of_code code =
     | Access (k, m) ->
         ws depth ^ "access " ^ string_of_int k ^ "\n"
         ^ aux (depth + 1) m
+    | LetRec m ->
+        ws depth ^ "letrec\n" ^ aux (depth + 1) m
   in
   aux 0 code
 
@@ -82,7 +89,7 @@ let eval ?(trace=false) env code =
         print_trace depth ("load = " ^ string_of_value v) ;
         v
     | Var n ->
-        let v = List.nth env n in
+        let v = !(List.nth env n) in
         print_trace depth ("var " ^ string_of_int n ^ " = " ^ string_of_value v) ;
         v
     | Abs m ->
@@ -94,9 +101,15 @@ let eval ?(trace=false) env code =
         (* if the term being evaluated is well-typed, clo is a Closure *)
         let Closure (c, e) = clo in
         print_trace depth "apply {" ;
-        let v = aux (depth + 1) (arg :: e) c in
+        let v = aux (depth + 1) (ref arg :: e) c in
         print_trace depth ("} = " ^ string_of_value v) ;
         v
+    | Op ((Oadd | Osub | Omul as f), m, n) ->
+        let Int u = aux depth env m in
+        let Int v = aux depth env n in
+        let w = Int (match f with Omul -> u * v | Oadd -> u + v | Osub -> u - v) in
+        print_trace depth (string_of_operator f ^ " = " ^ string_of_value w) ;
+        w
     | Op ((Oand | Oor as f), m, n) ->
         let Bool u = aux depth env m in
         (* short circuit *)
@@ -137,6 +150,11 @@ let eval ?(trace=false) env code =
         let Block vs = aux depth env m in
         let v = List.nth vs k in
         print_trace depth ("access " ^ string_of_int k ^ " = " ^ string_of_value v) ;
+        v
+    | LetRec m ->
+        let dummy = ref Unit in
+        let v = aux depth (dummy :: env) m in
+        dummy := v ;
         v
   in
   try Ok (aux 0 env code) with Failure -> Error ()

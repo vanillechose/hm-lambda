@@ -180,8 +180,6 @@ and codegen_term layout (_, term) =
     | Pprim (f, m, n) -> Op (f, codegen_term layout m, codegen_term layout n)
     | Plambda (x, m) -> let m = codegen_term (bind x layout) m in Abs m
     | Papp (m, n) -> App (codegen_term layout m, codegen_term layout n)
-    (* let x = M in N ~> (\x. N) M *)
-    | Pletin (x, m, n) -> App (Abs (codegen_term (bind x layout) n), codegen_term layout m)
     | Ptuple ms -> MakeBlock (List.map (codegen_term layout) ms)
     (* match m with DT ~> (\x. DT x) m *)
     | Pmatch { expr ; arms } ->
@@ -194,6 +192,11 @@ and codegen_term layout (_, term) =
         let ifbr = codegen_term layout ifbr in
         let elsebr = codegen_term layout elsebr in
         Branch { cond ; ifbr ; elsebr }
+    (* let x = M in N ~> (\x. N) M *)
+    | Pletin { isrec = false ; name = x ; arg = m ; body = n } ->
+        App (Abs (codegen_term (bind x layout) n), codegen_term layout m)
+    | Pletin { isrec = true ; name = x ; arg = m ; body = n } ->
+        App (Abs (codegen_term (bind x layout) n), LetRec (codegen_term (bind x layout) m))
 
 and codegen_decision_tree layout = function
   | Fail -> Fail "match failure"
@@ -214,9 +217,10 @@ and codegen_decision_tree layout = function
 
 and codegen layout item =
   match item with
-    | Pletdef (Some name, term) ->
-        let code = codegen_term layout term in
+    | Pletdef { isrec ; name ; body } ->
+        let layout = if isrec then bind name layout else layout in
+        let code = LetRec (codegen_term layout body) in
         (code, bind name layout)
-    | Pletdef (None, term) ->
+    | Ptopexp term ->
         let code = codegen_term layout term in
         (code, layout)

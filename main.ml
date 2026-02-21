@@ -44,6 +44,9 @@ let report_semantic_error source = function
       let msg = "variable " ^ name ^ " is bound more than once in pattern "
         ^ Terms.string_of_pattern pattern in
       err_with_source source loc msg
+  | Typing.IllegalLetRec { loc } ->
+      let msg = "this kind of expression is illegal in a let rec" in
+      err_with_source source loc msg
 
 (* repl state *)
 let toplevel_env    = ref Typing.empty_env
@@ -66,7 +69,7 @@ let rec interp source =
       | line -> interp (source ^ "\n" ^ line)
   end else
     let r = Result.map_error (report_parse_error source) r in
-    Result.bind r (fun (Pletdef(name, _) as item) ->
+    Result.bind r (fun item ->
       let r = Typing.type_item !toplevel_env item in
       let r = Result.map_error (report_semantic_error source) r in
       Result.bind r (fun (typ, env) ->
@@ -83,9 +86,10 @@ let rec interp source =
         let v = Eval.eval ~trace:!show_trace !interpreter_env code in
         Result.bind v (fun v ->
           let name =
-            match name with
-              | Some name -> interpreter_env := v :: !interpreter_env ; name
-              | None -> "-"
+            match item with
+              | Pletdef { name ; _ } ->
+                  interpreter_env := ref v :: !interpreter_env ; name
+              | _ -> "-"
           in
           print_eval_result name v typ ;
           Ok ()
@@ -95,7 +99,7 @@ let rec interp source =
 
 let dump_env () =
   List.iteri
-    (fun n v -> Printf.printf "%d = %s\n%!" n (Eval.string_of_value v))
+    (fun n v -> Printf.printf "%d = %s\n%!" n (Eval.string_of_value !v))
     !interpreter_env
 
 let rec repl _ =

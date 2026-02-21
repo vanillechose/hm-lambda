@@ -1,10 +1,13 @@
 type location = int
 
 type atomic_op =
+  | Oadd
   | Oand
   | Oeq
+  | Omul
   | Oneq
   | Oor
+  | Osub
 
 type atomic_val =
   | Aunit
@@ -27,10 +30,12 @@ type term =
   | Pifelse of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
   | Pmatch  of { expr : lterm ; arms : (lpattern * lterm) list }
   | Plambda of string * lterm
-  | Pletin  of string * lterm * lterm
+  | Pletin  of { isrec : bool ; name : string ; arg : lterm ; body : lterm }
 and lterm = location * term
 
-type toplevel_item = Pletdef of string option * lterm
+type toplevel_item =
+  | Pletdef of { isrec : bool ; name : string ; body : lterm }
+  | Ptopexp of lterm
 
 val string_of_pattern : lpattern -> string
 val string_of_term : lterm -> string

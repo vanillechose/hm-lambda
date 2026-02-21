@@ -60,6 +60,8 @@ fst : '1 * '3 -> '1 = <fun>
     polymorphic object. Each occurrence of `x` in `N` will be typed with
     its own instance of `x`'s type scheme, allowing expressions like
     `let f = \x. x in f f` to be written
+    - recursive let bindings (`let rec name = expr`) are supported provided expr
+    is a function definition
 
 Additionally, **top-level bindings** of the form `let x = M` are supported. In this
 case, `x` will remain in the scope for the rest of the program.
@@ -72,8 +74,6 @@ top-level directives of the form `#directive`:
 - `#env` : show the layout of the execution environment
 
 ## Bugs / Todo
-
-- Type and evaluate `let rec` bindings
 
 - Improve type inference. The type system, based on algorithm W as described in [1],
 is easy to implement and doesn't technically require mutability, but it's slow

@@ -1,10 +1,13 @@
 type location = int
 
 type atomic_op =
+  | Oadd
   | Oand
   | Oeq
+  | Omul
   | Oneq
   | Oor
+  | Osub
 
 type atomic_val =
   | Aunit
@@ -27,11 +30,12 @@ type term =
   | Pifelse of { cond : lterm ; ifbr : lterm ; elsebr : lterm }
   | Pmatch  of { expr : lterm ; arms : (lpattern * lterm) list }
   | Plambda of string * lterm
-  | Pletin  of string * lterm * lterm
+  | Pletin  of { isrec : bool ; name : string ; arg : lterm ; body : lterm }
 and lterm = location * term
 
 type toplevel_item =
-  | Pletdef of string option * lterm
+  | Pletdef of { isrec : bool ; name : string ; body : lterm }
+  | Ptopexp of lterm
 
 let string_of_pattern (_, p) =
   let module Info =
@@ -69,8 +73,14 @@ let string_of_term (_, m) =
         | Pvar x -> Constant x
 
         | Papp ((_, left), (_, right)) ->
-            Binary { prec = 41 ; assoc = Left ; left ;
+            Binary { prec = 61 ; assoc = Left ; left ;
               infix = " " ; right }
+        | Pprim ((Omul as f), (_, left), (_, right)) ->
+            Binary { prec = 55 ; assoc = Left ; left ;
+              infix = if f = Oadd then " + " else " - " ; right }
+        | Pprim ((Oadd | Osub as f), (_, left), (_, right)) ->
+            Binary { prec = 51 ; assoc = Left ; left ;
+              infix = if f = Oadd then " + " else " - " ; right }
         | Pprim ((Oneq | Oeq as f), (_, left), (_, right)) ->
             Binary { prec = 41 ; assoc = Right ; left ;
               infix = if f = Oeq then " = " else " <> " ; right }
@@ -87,9 +97,10 @@ let string_of_term (_, m) =
               suffix = "" ; children = [ " then ", n ; " else ", o ] }
         | Plambda (x, (_, m)) ->
             Unary { prec = 1 ; prefix = "\\" ^ x ^ ". " ; suffix = m }
-        | Pletin (x, (_, m), (_, n)) ->
-            Nary { prec = 1 ; prefix = "let " ^ x ^ " = " ; head = m ;
-              suffix = "" ; children = [ " in ", n ] }
+        | Pletin { isrec ; name = x ; arg = (_, m) ; body = (_, n) } ->
+            Nary { prec = 1 ;
+              prefix = (if isrec then "let rec " else "let ") ^ x ^ " = " ;
+              head = m ; suffix = "" ; children = [ " in ", n ] }
         | Pmatch { expr = (_, m) ; arms } ->
             let children =
               List.map (fun (p, (_, n)) ->
@@ -232,22 +243,48 @@ let parse source =
   and parse_factor stack =
     match tok () with
       | And
+      | Case
       | Comma
       | Else
       | Eq
       | In
+      | Minus
       | Neq
       | Or
-      | Then
-      | With
-      | Case
+      | Plus
       | RParen
-      | Semisemi ->
+      | Semisemi
+      | Then
+      | Times
+      | With ->
           reduce (loc ()) (List.rev stack)
       | _ -> let m = parse_atom () in parse_factor (m :: stack)
+  
+  and parse_mul_tail acc =
+    match tok () with
+      | Times ->
+          let off = loc () in
+          bump () ;
+          let n   = parse_factor [] in
+          parse_mul_tail (off, Pprim (Omul, acc, n))
+      | _ -> acc
+  and parse_mul () =
+    parse_mul_tail (parse_factor [])
+  
+  and parse_add_tail acc =
+    match tok () with
+      | Plus | Minus as t ->
+          let off = loc () in
+          bump () ;
+          let op  = if t = Plus then Oadd else Osub in
+          let n   = parse_mul () in
+          parse_add_tail (off, Pprim (op, acc, n))
+      | _ -> acc
+  and parse_add () =
+    parse_add_tail (parse_mul ())
 
   and parse_test () =
-    let m = parse_factor [] in
+    let m = parse_add () in
     match tok () with
       | Eq | Neq as f ->
           let off = loc () in
@@ -343,12 +380,13 @@ let parse source =
       | Let ->
           let off  = loc () in
           bump () ;
+          let isrec = match tok () with Rec -> bump () ; true | _ -> false in
           let name = expect_ident () in
           let _    = expect Eq in
           let m    = parse_term () in
           let _    = expect In in
           let n    = parse_term () in
-          (off, Pletin (name, m, n))
+          (off, Pletin { isrec ; name ; arg = m ; body = n })
       | Lambda ->
           let off = loc () in
           bump () ;
@@ -379,32 +417,31 @@ let parse source =
   
   and parse_item () =
     let off = loc () in
-    let name =
-      if tok () = Let then begin
-        bump () ;
-        let name = expect_ident () in
-        let _    = expect Eq in
-        Some name
-      end else
-        None
-    in
-    let m = parse_term () in
-    let def =
-      match tok (), name with
-        | (In, Some name) ->
+    let item =
+      match tok () with
+        | Let ->
             bump () ;
-            let n = parse_term () in
-            Pletdef (None, (off, Pletin (name, m, n)))
-        | (Semisemi, _) ->
-            Pletdef (name, m)
-        | (Eof, _) ->
-            raise (Parse_error UnexpectedEOF)
-        | (t, _) ->
-            let msg = "unexpected " ^ string_of_token t ^ ", expected end of file"
-              ^ if name <> None then " or 'in'" else "" in
-            raise (Parse_error (SyntaxError (loc (), msg)))
+            let isrec = match tok () with Rec -> bump () ; true | _ -> false in
+            let name = expect_ident () in
+            let _    = expect Eq in
+            let m    = parse_term () in
+            begin match tok () with
+              | Semisemi -> Pletdef { isrec ; name ; body = m }
+              | In ->
+                  bump () ;
+                  let n = parse_term () in
+                  Ptopexp (off, Pletin { isrec ; name ; arg = m ; body = n })
+              | Eof -> raise (Parse_error UnexpectedEOF)
+              | t ->
+                  let msg = "unexpected " ^ string_of_token t ^ ", expected "
+                    ^ "';;' or 'in'" in
+                  raise (Parse_error (SyntaxError (loc (), msg)))
+            end
+        | _ ->
+            let m = parse_term () in
+            Ptopexp m
     in
     expect Semisemi ;
-    def
+    item
   in
   try Ok (parse_item ()) with Parse_error e -> Error e
